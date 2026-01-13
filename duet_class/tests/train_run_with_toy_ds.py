@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from duet.model import DUETModel
 from pipeline import evaluate, preprocess, train
+from pipeline.prepare_and_check import FinancialTimeSeriesPreparer
 from pipeline.config import DUETConfig
 
 
@@ -86,8 +87,12 @@ def test_train_run_with_toy_dataset(ci: bool, use_router: bool, predict_type: st
     config = build_config(ci=ci, use_router=use_router, predict_type=predict_type)
     df = build_toy_dataframe()
 
-    df = preprocess.prepare_time_series(df, config)
-    preprocess.check_data(df, config)
+    preparer = FinancialTimeSeriesPreparer(
+        tz="UTC",
+        timestamp_col="timestamp",
+        drop_warmup=True,
+    )
+    df, _ = preparer.prepare(df, ensure_ohlcv=True)
     df_train, df_val = preprocess.split_dataframe(df, train_ratio=0.8)
 
     x_train, y_train = preprocess.prepare_windows(df_train, config)

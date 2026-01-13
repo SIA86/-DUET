@@ -48,13 +48,32 @@ DUET — архитектура для **классификации многом
 
 Архитектура DUET для классификации состоит из следующих этапов:
 
-1. Нормализация входного временного ряда
-2. Temporal Clustering Module (TCM)
-3. Channel Clustering Module (CCM)
-4. Fusion Module (FM)
-5. Classification Head
+1. Подготовка временного ряда (`prepare_and_check.py`)
+2. Нормализация входного временного ряда
+3. Temporal Clustering Module (TCM)
+4. Channel Clustering Module (CCM)
+5. Fusion Module (FM)
+6. Classification Head
 
 Все компоненты обучаются end-to-end.
+
+---
+
+## 0. Data Preparation (`prepare_and_check.py`)
+
+Перед подачей данных в модель используется единый подготовщик `FinancialTimeSeriesPreparer`:
+
+* `timestamp_col="timestamp"` — построение `DatetimeIndex` из колонки времени.
+* `tz="UTC"` — нормализация временной зоны.
+* `ensure_ohlcv=True` — приведение имён OHLCV и отчёт о пропущенных колонках.
+* `drop_warmup=True` — удаление префикса «прогрева» для rolling‑признаков.
+
+Подготовщик также:
+
+* удаляет дубликаты по времени,
+* восстанавливает регулярную частоту и помечает `gaps`,
+* заполняет пропуски по правилам (ffill/0/target не трогает),
+* добавляет диагностические флаги `nan_filled` и `candle_error`.
 
 ---
 

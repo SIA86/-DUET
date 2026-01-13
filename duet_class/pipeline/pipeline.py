@@ -1,5 +1,6 @@
 from .config import DUETConfig
 from . import preprocess, train as train_module
+from .prepare_and_check import FinancialTimeSeriesPreparer
 import pandas as pd
 from duet.model import DUETModel
 from torch.utils.data import DataLoader, TensorDataset
@@ -12,8 +13,12 @@ from sklearn.utils.class_weight import compute_class_weight
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def train(df: pd.DataFrame, config):
-  df = preprocess.prepare_time_series(df, config) # проверка пропусков, установка datetime индекса
-  preprocess.check_data(df, config) # проверка на nan & inf
+  preparer = FinancialTimeSeriesPreparer(
+    tz="UTC",
+    timestamp_col="timestamp",
+    drop_warmup=True,
+  )
+  df, _ = preparer.prepare(df, ensure_ohlcv=True)
   df_train, df_val = preprocess.split_dataframe(df, train_ratio=0.75)
 
   # --- 2. Создание окон и меток ---
