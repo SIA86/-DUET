@@ -3,15 +3,63 @@ import numpy as np
 import pandas as pd
 from typing import Any, Tuple
 
-from . import preprocess
+from .wf_slicer import GlobalNormConfig, SplitConfig, WalkForwardWindowSlicerVec, WindowConfig
 
    
+SCALER_MAP = {
+    "STD": "standard",
+    "MINMAX": "minmax",
+    "QUANT": "quantile",
+    "NONE": "none",
+}
+
+def _build_predict_slicer(config: Any) -> WalkForwardWindowSlicerVec:
+    split = SplitConfig(
+        n_folds=1,
+        mode="expanding",
+        ratios=(1.0, 0.0, 0.0),
+        gap=0,
+        step_size=None,
+        sliding_train_size=None,
+    )
+
+    window = WindowConfig(
+        x_window=config.seq_len,
+        x_end_offset=0,
+        y_window=0,
+        y_end_offset=0,
+        allow_left_context_for_x=False,
+    )
+
+    global_norm = GlobalNormConfig(
+        scaler=SCALER_MAP.get(config.scaler.upper(), "none"),
+    )
+
+    return WalkForwardWindowSlicerVec(
+        split=split,
+        window=window,
+        global_norm=global_norm,
+        no_norm_cols=config.not_to_normalise,
+        eps=1e-12,
+        drop_incomplete_last_fold=True,
+    )
+
+def _predict_time_offset(config: Any) -> int:
+    predict_type = config.predict_type.upper()
+    if predict_type == "DETECT":
+        return 0
+    if predict_type == "NEXT":
+        return 1
+    raise ValueError("config.predict_type должен быть 'DETECT' или 'NEXT'")
+
 def predict_window(model, x_window: pd.DataFrame, config: Any, device="cuda") -> np.ndarray:
     assert len(x_window) == config.seq_len , "X_window должно быть размером config.seq_len"
 
     model.eval()
 
-    x_train = preprocess.prepare_windows_for_pred(x_window, config)
+    slicer = _build_predict_slicer(config)
+    out = slicer.split_and_window(X=x_window[config.features])
+    x_train = out["fold_0"]["train"]["X"]
     x_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     
     with torch.no_grad():
@@ -40,7 +88,12 @@ def predict_dataset_batched(
     model.eval()
 
     # Получаем входы
-    X = preprocess.prepare_windows_for_pred(data, config)
+    slicer = _build_predict_slicer(config)
+    out = slicer.split_and_window(X=data[config.features])
+    fold0 = out["fold_0"]["train"]
+    X = fold0["X"]
+    t0 = fold0["t0"]
+    t_offset = _predict_time_offset(config)
     preds = []
     for i in range(0, len(X)+1, batch_size):
         batch = X[i:i + batch_size]
@@ -53,21 +106,18 @@ def predict_dataset_batched(
     y_pred_all = np.concatenate(preds, axis=0)  # shape: (n_preds, n_classes)
     n_preds, n_classes = y_pred_all.shape
 
-    # Смещение
-    if config.predict_type.upper() == "DETECT":
-        start_idx = config.seq_len - 1
-    elif config.predict_type.upper() == "NEXT":
-        start_idx = config.seq_len
-    else:
-        raise ValueError("config.predict_type должен быть 'DETECT' или 'NEXT'")
-
     # Инициализируем Series и массив
     labels_series = pd.Series(np.nan, index=data.index)
     probs_array = np.full((len(data), n_classes), np.nan, dtype=np.float32)
 
     # Заполнение
     labels = np.argmax(y_pred_all, axis=1)
-    labels_series.iloc[start_idx:start_idx + n_preds] = labels
-    probs_array[start_idx:start_idx + n_preds, :] = y_pred_all
+    target_idx = t0 + t_offset
+    valid = target_idx < len(data)
+    target_idx = target_idx[valid]
+    labels = labels[valid]
+    y_pred_all = y_pred_all[valid]
+    labels_series.iloc[target_idx] = labels
+    probs_array[target_idx, :] = y_pred_all
 
     return labels_series, probs_array

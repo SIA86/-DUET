@@ -77,6 +77,18 @@ DUET — архитектура для **классификации многом
 
 ---
 
+## 0.1 Data Slicing & Splitting (`wf_slicer.py`)
+
+Нарезка и разбиение данных выполняются через `WalkForwardWindowSlicerVec`:
+
+* `SplitConfig` задаёт walk‑forward разбиение на `train/val/test` (доли, режим `expanding/sliding`, `gap` для embargo).
+* `WindowConfig` описывает X/Y‑окна относительно якоря `t0` (длины и смещения `x_end_offset`, `y_end_offset`).
+* `GlobalNormConfig` управляет глобальной нормализацией (опционально), а `no_norm_cols` исключает колонки из скейлинга.
+
+Выход slicer'а — словарь фолдов, где для каждой части доступны `X`, `y` и индексы `t0`.
+
+---
+
 ## 1. Input Normalization
 
 Перед извлечением признаков применяется **Instance Normalization** по каждому каналу внутри временного ряда.
