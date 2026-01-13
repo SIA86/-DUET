@@ -10,9 +10,17 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from duet.model import DUETModel
-from pipeline import evaluate, preprocess, train
+from pipeline import evaluate, train
 from pipeline.prepare_and_check import FinancialTimeSeriesPreparer
 from pipeline.config import DUETConfig
+from pipeline.wf_slicer import GlobalNormConfig, SplitConfig, WalkForwardWindowSlicerVec, WindowConfig
+
+SCALER_MAP = {
+    "STD": "standard",
+    "MINMAX": "minmax",
+    "QUANT": "quantile",
+    "NONE": "none",
+}
 
 
 def build_toy_dataframe(num_points: int = 120, seed: int = 0) -> pd.DataFrame:
@@ -70,6 +78,43 @@ def build_config(ci: bool, use_router: bool, predict_type: str) -> DUETConfig:
         verbose=False,
     )
 
+def build_slicer(config: DUETConfig, train_ratio: float) -> WalkForwardWindowSlicerVec:
+    split = SplitConfig(
+        n_folds=1,
+        mode="expanding",
+        ratios=(train_ratio, 1 - train_ratio, 0.0),
+        gap=0,
+        step_size=None,
+        sliding_train_size=None,
+    )
+    predict_type = config.predict_type.upper()
+    if predict_type == "DETECT":
+        y_end_offset = 0
+    elif predict_type == "NEXT":
+        y_end_offset = 1
+    else:
+        raise ValueError("config.predict_type должен быть 'DETECT' или 'NEXT'")
+
+    window = WindowConfig(
+        x_window=config.seq_len,
+        x_end_offset=0,
+        y_window=1,
+        y_end_offset=y_end_offset,
+        allow_left_context_for_x=False,
+    )
+    global_norm = GlobalNormConfig(
+        scaler=SCALER_MAP.get(config.scaler.upper(), "none"),
+    )
+
+    return WalkForwardWindowSlicerVec(
+        split=split,
+        window=window,
+        global_norm=global_norm,
+        no_norm_cols=config.not_to_normalise,
+        eps=1e-12,
+        drop_incomplete_last_fold=True,
+    )
+
 
 @pytest.mark.parametrize(
     "ci,use_router,predict_type",
@@ -93,13 +138,16 @@ def test_train_run_with_toy_dataset(ci: bool, use_router: bool, predict_type: st
         drop_warmup=True,
     )
     df, _ = preparer.prepare(df, ensure_ohlcv=True)
-    df_train, df_val = preprocess.split_dataframe(df, train_ratio=0.8)
-
-    x_train, y_train = preprocess.prepare_windows(df_train, config)
-    x_val, y_val = preprocess.prepare_windows(df_val, config)
-
-    y_train = y_train.astype(int)
-    y_val = y_val.astype(int)
+    slicer = build_slicer(config, train_ratio=0.8)
+    out = slicer.split_and_window(
+        X=df[config.features],
+        y=df[[config.forecast]],
+    )
+    fold0 = out["fold_0"]
+    x_train = fold0["train"]["X"]
+    y_train = fold0["train"]["y"][:, 0, 0].astype(int)
+    x_val = fold0["val"]["X"]
+    y_val = fold0["val"]["y"][:, 0, 0].astype(int)
 
     train_ds = TensorDataset(
         torch.tensor(x_train, dtype=torch.float32),

@@ -1,6 +1,7 @@
 from .config import DUETConfig
 from . import preprocess, train as train_module
 from .prepare_and_check import FinancialTimeSeriesPreparer
+from .wf_slicer import GlobalNormConfig, SplitConfig, WalkForwardWindowSlicerVec, WindowConfig
 import pandas as pd
 from duet.model import DUETModel
 from torch.utils.data import DataLoader, TensorDataset
@@ -12,6 +13,51 @@ from sklearn.utils.class_weight import compute_class_weight
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+SCALER_MAP = {
+  "STD": "standard",
+  "MINMAX": "minmax",
+  "QUANT": "quantile",
+  "NONE": "none",
+}
+
+def _build_slicer(config: DUETConfig, train_ratio: float) -> WalkForwardWindowSlicerVec:
+  split = SplitConfig(
+    n_folds=1,
+    mode="expanding",
+    ratios=(train_ratio, 1 - train_ratio, 0.0),
+    gap=0,
+    step_size=None,
+    sliding_train_size=None,
+  )
+
+  predict_type = config.predict_type.upper()
+  if predict_type == "DETECT":
+    y_end_offset = 0
+  elif predict_type == "NEXT":
+    y_end_offset = 1
+  else:
+    raise ValueError("config.predict_type должен быть 'DETECT' или 'NEXT'")
+
+  window = WindowConfig(
+    x_window=config.seq_len,
+    x_end_offset=0,
+    y_window=1,
+    y_end_offset=y_end_offset,
+    allow_left_context_for_x=False,
+  )
+  global_norm = GlobalNormConfig(
+    scaler=SCALER_MAP.get(config.scaler.upper(), "none"),
+  )
+
+  return WalkForwardWindowSlicerVec(
+    split=split,
+    window=window,
+    global_norm=global_norm,
+    no_norm_cols=config.not_to_normalise,
+    eps=1e-12,
+    drop_incomplete_last_fold=True,
+  )
+
 def train(df: pd.DataFrame, config):
   preparer = FinancialTimeSeriesPreparer(
     tz="UTC",
@@ -19,16 +65,16 @@ def train(df: pd.DataFrame, config):
     drop_warmup=True,
   )
   df, _ = preparer.prepare(df, ensure_ohlcv=True)
-  df_train, df_val = preprocess.split_dataframe(df, train_ratio=0.75)
-
-  # --- 2. Создание окон и меток ---
-  # Предположим, что у вас есть отдельная колонка с метками классов: например, 'target'
-  # Если нет, то вам нужно определить логику создания меток из временных окон
-
-  # Создаем окна и метки классов
-  x_train, y_train = preprocess.prepare_windows(df_train, config)
-  x_val, y_val = preprocess.prepare_windows(df_val, config)
-
+  slicer = _build_slicer(config, train_ratio=0.75)
+  out = slicer.split_and_window(
+    X=df[config.features],
+    y=df[[config.forecast]],
+  )
+  fold0 = out["fold_0"]
+  x_train = fold0["train"]["X"]
+  y_train = fold0["train"]["y"][:, 0, 0].astype(int)
+  x_val = fold0["val"]["X"]
+  y_val = fold0["val"]["y"][:, 0, 0].astype(int)
 
   # Балансируем только train (val/test оставляем в исходном распределении)
   x_train, y_train = preprocess.balance_windows(x_train, y_train)
