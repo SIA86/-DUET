@@ -18,6 +18,13 @@ class DUETConfig:
     patch_len: int = 16             # Длина патча (TCM)
     stride: int = 8                 # Шаг между патчами (TCM)
     moving_avg: int = 25            # Размер окна скользящего сглаживания
+    K_t: int = 2                    # Кол-во временных кластеров (TCM)
+    K_c: int = 4                    # Кол-во кластеров каналов (CCM)
+    d_c: int = 32                   # Размерность embedding каналов (CCM)
+    top_k: int = 2                  # Кол-во связей при разреживании маски
+    use_revin: bool = False         # Включить RevIN/InstanceNorm
+    revin_affine: bool = True       # Использовать affine параметры в RevIN
+    revin_eps: float = 1e-5         # Эпсилон для стабильности RevIN
 
     # =========================
     # Параметры модели

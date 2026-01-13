@@ -8,11 +8,8 @@ class DUETHead(nn.Module):
     - возвращает логиты/вероятности классов
     """
 
-    def __init__(self, d_model: int, num_classes: int, dropout: float = 0.0, activation: str = "softmax"):
+    def __init__(self, d_model: int, num_classes: int, dropout: float = 0.0):
         super().__init__()
-
-        # Активация
-        self.activation = nn.Softmax(dim=1)
         
         # Head для классификации
         self.head = nn.Sequential(
@@ -27,4 +24,4 @@ class DUETHead(nn.Module):
         # x: [B, N, d_model]
         x = x.mean(dim=1)           # [B, d_model], усреднение по последовательности
         logits = self.head(x)       # [B, num_classes]
-        return self.activation(logits)
+        return logits
