@@ -1,6 +1,5 @@
 
-from dataclasses import dataclass
-from pydantic import Field
+from dataclasses import dataclass, field
 
 @dataclass
 class DUETConfig:
@@ -8,9 +7,9 @@ class DUETConfig:
     # Общие параметры
     # =========================
     timestamp_col: str = "timestamp" # Название колонки с таймстэмпом
-    features: list[str] = Field(default_factory=list)
+    features: list[str] = field(default_factory=list)
     forecast: str = 'target'    
-    not_to_normalise: list[str] = Field(default_factory=list)
+    not_to_normalise: list[str] = field(default_factory=list)
     scaler: str = 'STD'             # Тип нормализации (STD, MINMAX, QUANT)
     predict_type: str = 'detect'    # Детекция "detect" или предикт "next" следующей свечи
     seq_len: int = 96               # Длина входной последовательности
@@ -22,7 +21,7 @@ class DUETConfig:
     K_c: int = 4                    # Кол-во кластеров каналов (CCM)
     d_c: int = 32                   # Размерность embedding каналов (CCM)
     top_k: int = 2                  # Кол-во связей при разреживании маски
-    use_revin: bool = False         # Включить RevIN/InstanceNorm
+    use_revin: bool = True          # Включить RevIN/InstanceNorm
     revin_affine: bool = True       # Использовать affine параметры в RevIN
     revin_eps: float = 1e-5         # Эпсилон для стабильности RevIN
 
@@ -43,7 +42,7 @@ class DUETConfig:
     # Режимы обработки
     # =========================
     CI: bool = True                 # Channel-Independent режим (если False — shared weights)
-    use_router: bool = False        # Включить распределительный роутер
+    use_router: bool = True         # Включить распределительный роутер
     timeenc: int = 1                # Использовать time encoding (0 = без, 1 = sin/cos и т.п.)
 
     # =========================
