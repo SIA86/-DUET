@@ -1,7 +1,7 @@
 
 import torch
 import torch.nn as nn
-from duet.components import TCM, CCM, Router, DUETHead
+from duet.components import TCM, CCM, Fusion, RevIN, DUETHead
 
 class DUETModel(nn.Module):
     """
@@ -10,20 +10,21 @@ class DUETModel(nn.Module):
     - RevIN (опционально)
     - Temporal Clustering Module (TCM)
     - Channel Clustering Module (CCM)
-    - Router (опционально)
+    - Fusion Module
     - DUETHead
     """
     def __init__(self, config):
         super().__init__()
         self.config = config
 
+        num_channels = len(config.features) if config.features else None
+        self.use_revin = config.use_revin
+        self.revin = RevIN(num_channels=num_channels, affine=config.revin_affine, eps=config.revin_eps)
         self.tcm = TCM(config)
         self.ccm = CCM(config)
-        self.channel_proj = None
-
-        self.use_router = config.use_router
-        if self.use_router:
-            self.router = Router(d_model=config.d_model, num_experts=config.num_experts)
+        self.fusion = Fusion()
+        self.last_W_t = None
+        self.last_M = None
 
         self.head = DUETHead(
             d_model=config.d_model,
@@ -33,25 +34,16 @@ class DUETModel(nn.Module):
 
     def forward(self, x):
         # x: [B, T, C]
-        if self.config.CI:
-            outs = []
-            for i in range(x.size(-1)):
-                xi = x[:, :, i].unsqueeze(-1)  # [B, L, 1]
-                outi = self.tcm(xi)            # [B, N, d_model]
-                outs.append(outi)
-            x = torch.cat(outs, dim=-1)        # [B, N, d_model * D]
-            if self.channel_proj is None:
-                D = x.size(-1) // self.config.d_model
-                self.channel_proj = nn.Linear(self.config.d_model * D, self.config.d_model).to(x.device)
-            x = self.channel_proj(x)
-        else:
-            x = self.tcm(x)  # [B, N, d_model]
-            
-        x = self.ccm(x)       # [B, N, d_model]
+        if self.use_revin:
+            x = self.revin(x)
 
-        if self.use_router:
-            weights = self.router(x)  # [B, num_experts] — опционально сохранять для анализа
+        z_t, w_t = self.tcm(x)       # [B, N, C, d_model], [B, N, K_t]
+        mask = self.ccm(x)           # [B, C, C]
+        z = self.fusion(z_t, mask)   # [B, N, d_model]
 
-        out = self.head(x)    # [B, horizon]
+        self.last_W_t = w_t
+        self.last_M = mask
+
+        out = self.head(z)    # [B, num_classes]
 
         return out

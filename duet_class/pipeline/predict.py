@@ -15,7 +15,8 @@ def predict_window(model, x_window: pd.DataFrame, config: Any, device="cuda") ->
     x_tensor = torch.tensor(x_train, dtype=torch.float32).to(device)
     
     with torch.no_grad():
-        y_pred_tensor = model(x_tensor)
+        logits = model(x_tensor)
+        y_pred_tensor = torch.softmax(logits, dim=-1)
 
     y_pred = y_pred_tensor.cpu().numpy()
 
@@ -45,7 +46,8 @@ def predict_dataset_batched(
         batch = X[i:i + batch_size]
         x_tensor = torch.tensor(batch, dtype=torch.float32).to(device)
         with torch.no_grad():
-            y_batch = model(x_tensor).cpu().numpy()  # (batch_size, n_classes)
+            logits = model(x_tensor)
+            y_batch = torch.softmax(logits, dim=-1).cpu().numpy()  # (batch_size, n_classes)
         preds.append(y_batch)
 
     y_pred_all = np.concatenate(preds, axis=0)  # shape: (n_preds, n_classes)
