@@ -216,7 +216,7 @@ def prepare_windows(df: pd.DataFrame, config):
 
         # Сохраняем
         X.append(window_scaled[:, feature_idxs])
-        y.append(target_window.squeeze())
+        y.append(target_window.squeeze().astype(int))
 
     return np.array(X), np.array(y)
 
@@ -280,4 +280,3 @@ def prepare_windows_for_pred(df: pd.DataFrame, config):
         X.append(window_scaled[:, feature_idxs])
 
     return np.array(X)
-

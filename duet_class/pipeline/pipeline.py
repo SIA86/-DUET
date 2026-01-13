@@ -1,7 +1,7 @@
 from .config import DUETConfig
-from . import preprocess
+from . import preprocess, train as train_module
 import pandas as pd
-from ..duet.model import DUETModel
+from duet.model import DUETModel
 from torch.utils.data import DataLoader, TensorDataset
 import torch
 import joblib
@@ -25,9 +25,8 @@ def train(df: pd.DataFrame, config):
   x_val, y_val = preprocess.prepare_windows(df_val, config)
 
 
-  # Балансируем (если не нужно, то закомментировать)
+  # Балансируем только train (val/test оставляем в исходном распределении)
   x_train, y_train = preprocess.balance_windows(x_train, y_train)
-  x_val, y_val = preprocess.balance_windows(x_val, y_val)
 
   # Проверяем балансировку
   unique, counts = np.unique(y_train, return_counts=True)
@@ -55,7 +54,7 @@ def train(df: pd.DataFrame, config):
   model = DUETModel(config).to(DEVICE)
 
   # --- 7. Обучение модели ---
-  trained_model = train.train_model(
+  trained_model = train_module.train_model(
       model,
       config,
       train_loader,
@@ -64,4 +63,4 @@ def train(df: pd.DataFrame, config):
       class_weights = class_weights
   )
 
-  return model
+  return trained_model

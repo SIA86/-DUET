@@ -17,7 +17,14 @@ class DUETModel(nn.Module):
         super().__init__()
         self.config = config
 
-        num_channels = len(config.features) if config.features else None
+        num_channels = None
+        if config.features:
+            time_features = 0
+            if getattr(config, "timeenc", None) == 1:
+                time_features = 10
+            elif getattr(config, "timeenc", None) == 0:
+                time_features = 5
+            num_channels = len(config.features) + time_features
         self.use_revin = config.use_revin
         self.revin = RevIN(num_channels=num_channels, affine=config.revin_affine, eps=config.revin_eps)
         self.tcm = TCM(config)
