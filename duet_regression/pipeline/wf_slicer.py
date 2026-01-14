@@ -647,10 +647,10 @@ class WalkForwardWindowSlicerVec:
             raise ValueError("gap must be >= 0")
         if not np.isclose(tr_r + va_r + te_r, 1.0):
             raise ValueError("ratios must sum to 1.0")
-        if te_r <= 0:
-            raise ValueError("test ratio must be > 0")
-
         if n_folds == 1:
+            if va_r == 0 and te_r == 0:
+                return [{"train": (0, T), "val": (T, T), "test": (T, T)}]
+
             usable = T - 2 * gap
             if usable <= 0:
                 raise ValueError(f"Not enough data for gap={gap}: need T > 2*gap, got T={T}")
@@ -689,6 +689,9 @@ class WalkForwardWindowSlicerVec:
             test_end = min(T, test_start + test_len)
 
             return [{"train": (train_start, train_end), "val": (val_start, val_end), "test": (test_start, test_end)}]
+
+        if te_r <= 0:
+            raise ValueError("test ratio must be > 0")
 
         # Multi-fold heuristic
         test_len = max(1, int(np.floor((T * te_r) / n_folds)))
