@@ -54,6 +54,26 @@ def test_build_folds_single_with_gap() -> None:
     ]
 
 
+def test_no_split_all_train() -> None:
+    split = SplitConfig(n_folds=1, ratios=(1.0, 0.0, 0.0))
+    window = WindowConfig(x_window=3)
+    slicer = build_slicer(split, window)
+
+    X = make_series(10, 1)
+    out = slicer.split_and_window(X)
+    train = out["fold_0"]["train"]
+    val = out["fold_0"]["val"]
+    test = out["fold_0"]["test"]
+
+    assert np.array_equal(train["t0"], np.arange(2, 10))
+    assert val["X"].shape[0] == 0
+    assert test["X"].shape[0] == 0
+    assert val["t0"].size == 0
+    assert test["t0"].size == 0
+    assert val["y"] is None
+    assert test["y"] is None
+
+
 def test_build_folds_multi_expanding() -> None:
     split = SplitConfig(n_folds=2, ratios=(0.6, 0.2, 0.2), gap=1, mode="expanding")
     window = WindowConfig(x_window=3)
