@@ -1,7 +1,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 class SeriesDecomposition(nn.Module):
     """
@@ -24,31 +23,15 @@ class LinearPatternExtractor(nn.Module):
     """
     Линейная проекция патча (в духе Transformer patch embedding)
     """
-    def __init__(self, patch_len, d_model, ci=True, dropout=0.0):
+    def __init__(self, patch_len, d_model, dropout=0.0):
         super().__init__()
-        self.ci = ci
-        self.projection = nn.ModuleList()
+        self.projection = nn.Linear(patch_len * 2, d_model)
         self.dropout = nn.Dropout(dropout)
-        self.patch_len = patch_len
-
-        if self.ci:
-            # Отдельная проекция для каждого канала
-            for _ in range(1):  # Проекция на 1 признаковое измерение (для seasonal + trend)
-                self.projection.append(nn.Linear(patch_len * 2, d_model))
-        else:
-            self.shared_proj = nn.Linear(patch_len * 2, d_model)
 
     def forward(self, seasonal, trend):
-        # x: [B, T, C] и [B, T, C]
-        x = torch.cat([seasonal, trend], dim=-1)   # [B, T, 2*C]
-        if self.ci:
-            B, T, _ = x.shape
-            C = 1
-            x = x.view(B, T, C, -1)                 # [B, T, 1, 2]
-            out = self.projection[0](x.squeeze(2))  # [B, T, d_model]
-        else:
-            out = self.shared_proj(x)              # [B, T, d_model]
-
+        # seasonal/trend: [B, N, C, patch_len]
+        x = torch.cat([seasonal, trend], dim=-1)   # [B, N, C, 2*patch_len]
+        out = self.projection(x)
         return self.dropout(out)
 
 class TCM(nn.Module):
@@ -63,73 +46,45 @@ class TCM(nn.Module):
         self.decomp = SeriesDecomposition(config.moving_avg)
         self.patch_len = config.patch_len
         self.stride = config.stride
-        self.num_experts = config.num_experts
-        self.extractor = LinearPatternExtractor(
-            patch_len=config.patch_len,
-            d_model=config.d_model,
-            ci=config.CI,
-            dropout=config.dropout
-        )
+        self.num_clusters = config.K_t
         self.use_router = config.use_router
-        if self.use_router:
-            # Distributional Router (обучаемый softmax)
-            self.router = nn.Sequential(
-                nn.Linear(config.d_model, config.num_experts),
-                nn.Softmax(dim=-1)
+        self.extractors = nn.ModuleList([
+            LinearPatternExtractor(
+                patch_len=config.patch_len,
+                d_model=config.d_model,
+                dropout=config.dropout
             )
-            # K независимых экспертов
-            self.experts = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(config.d_model, config.d_model),
-                    nn.ReLU(),
-                    nn.Dropout(config.dropout)
-                )
-                for _ in range(config.num_experts)
-            ])
-
-        self.dist_weights = None  # сохраняем для анализа
+            for _ in range(config.K_t)
+        ])
+        self.router = nn.Sequential(
+            nn.Linear(config.patch_len, config.d_model),
+            nn.ReLU(),
+            nn.Linear(config.d_model, config.K_t)
+        )
 
     def forward(self, x):
         # x: [B, T, C]
         seasonal, trend = self.decomp(x)
         B, T, C = x.shape
 
-        # Patching по временной оси
-        n_patches = (T - self.patch_len) // self.stride + 1
-        patches_seasonal = []
-        patches_trend = []
+        seasonal = seasonal.transpose(1, 2).unfold(dimension=2, size=self.patch_len, step=self.stride)
+        trend = trend.transpose(1, 2).unfold(dimension=2, size=self.patch_len, step=self.stride)
+        seasonal = seasonal.permute(0, 2, 1, 3)  # [B, N, C, patch_len]
+        trend = trend.permute(0, 2, 1, 3)        # [B, N, C, patch_len]
 
-        for i in range(n_patches):
-            s_patch = seasonal[:, i*self.stride : i*self.stride+self.patch_len, :]
-            t_patch = trend[:, i*self.stride : i*self.stride+self.patch_len, :]
-            patches_seasonal.append(s_patch)
-            patches_trend.append(t_patch)
-
-        seasonal = torch.stack(patches_seasonal, dim=1)  # [B, N, patch_len, C]
-        trend = torch.stack(patches_trend, dim=1)        # [B, N, patch_len, C]
-
-        # Объединяем патчи обратно: [B, N, patch_len * C]
-        seasonal = seasonal.permute(0, 1, 3, 2).reshape(B, -1, self.patch_len)
-        trend = trend.permute(0, 1, 3, 2).reshape(B, -1, self.patch_len)
-
-        x_proj = self.extractor(seasonal, trend)  # [B, N, d_model]
-
+        patch_summary = (seasonal + trend).mean(dim=2)  # [B, N, patch_len]
         if self.use_router:
-            # Router → веса принадлежности патча к каждому кластеру (эксперту)
-            dist_weights = self.router(x_proj)        # [B, N, K]
-            self.dist_weights = dist_weights          # сохранить для анализа
-
-            # Вызов всех экспертов
-            expert_outs = []
-            for expert in self.experts:
-                expert_out = expert(x_proj)           # [B, N, d_model]
-                expert_outs.append(expert_out)
-
-            # Агрегация: взвешенная сумма
-            stacked = torch.stack(expert_outs, dim=-1)   # [B, N, d_model, K]
-            dist_weights = dist_weights.unsqueeze(2)     # [B, N, 1, K]
-            out = torch.sum(stacked * dist_weights, dim=-1)  # [B, N, d_model]
-
-            return out
+            weights_router = torch.softmax(self.router(patch_summary), dim=-1)
         else:
-            return x_proj
+            weights_router = torch.full(
+                (B, patch_summary.size(1), self.num_clusters),
+                1.0 / self.num_clusters,
+                device=x.device,
+                dtype=x.dtype,
+            )
+
+        expert_outputs = [extractor(seasonal, trend) for extractor in self.extractors]
+        stacked = torch.stack(expert_outputs, dim=3)  # [B, N, C, K_t, d_model]
+        weights = weights_router.unsqueeze(2).unsqueeze(-1)  # [B, N, 1, K_t, 1]
+        out = (stacked * weights).sum(dim=3)                 # [B, N, C, d_model]
+        return out, weights_router
