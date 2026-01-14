@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
+import os
 
 
 # --- Loss functions ---
@@ -47,6 +48,9 @@ def train_model(model, config: DUETConfig, train_loader, val_loader, device="cud
     Обучает модель для задачи классификации.
     Раз в config.report_freq эпох выводит confusion matrix.
     """
+    parent_dir = os.path.dirname(config.checkpoint_best)
+    os.makedirs(parent_dir, exist_ok=True)
+    
     model = model.to(device)
 
     loss_fn = WeightedCrossEntropyLoss(weights=class_weights)
