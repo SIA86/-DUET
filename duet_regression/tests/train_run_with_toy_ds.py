@@ -79,10 +79,12 @@ def build_config(ci: bool, use_router: bool) -> DUETConfig:
     )
 
 def build_slicer(config: DUETConfig, train_ratio: float) -> WalkForwardWindowSlicerVec:
+    val_ratio = (1 - train_ratio) * 0.5
+    test_ratio = 1 - train_ratio - val_ratio
     split = SplitConfig(
         n_folds=1,
         mode="expanding",
-        ratios=(train_ratio, 1 - train_ratio, 0.0),
+        ratios=(train_ratio, val_ratio, test_ratio),
         gap=0,
         step_size=None,
         sliding_train_size=None,
@@ -130,7 +132,7 @@ def test_train_run_with_toy_dataset(ci: bool, use_router: bool) -> None:
         drop_warmup=True,
     )
     df, _ = preparer.prepare(df, ensure_ohlcv=True)
-    slicer = build_slicer(config, train_ratio=0.8)
+    slicer = build_slicer(config, train_ratio=0.6)
     out = slicer.split_and_window(
         X=df[config.features],
         y=df[config.forecast],
