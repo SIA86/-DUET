@@ -135,5 +135,7 @@ def train_model(model, config: DUETConfig, train_loader, val_loader, device="cud
         print(f'Saving final model weights to {config.checkpoint_final}')
         torch.save(model.state_dict(), config.checkpoint_final)
         
+    if best_state is None:
+        best_state = model.state_dict()
     model.load_state_dict(best_state)
     return model

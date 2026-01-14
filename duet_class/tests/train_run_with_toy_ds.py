@@ -13,6 +13,7 @@ from duet.model import DUETModel
 from pipeline import evaluate, train
 from pipeline.prepare_and_check import FinancialTimeSeriesPreparer
 from pipeline.config import DUETConfig
+from pipeline.timefeatures import time_features_from_index
 from pipeline.wf_slicer import GlobalNormConfig, SplitConfig, WalkForwardWindowSlicerVec, WindowConfig
 
 SCALER_MAP = {
@@ -79,10 +80,13 @@ def build_config(ci: bool, use_router: bool, predict_type: str) -> DUETConfig:
     )
 
 def build_slicer(config: DUETConfig, train_ratio: float) -> WalkForwardWindowSlicerVec:
+    remaining_ratio = 1 - train_ratio
+    val_ratio = remaining_ratio / 2
+    test_ratio = remaining_ratio / 2
     split = SplitConfig(
         n_folds=1,
         mode="expanding",
-        ratios=(train_ratio, 1 - train_ratio, 0.0),
+        ratios=(train_ratio, val_ratio, test_ratio),
         gap=0,
         step_size=None,
         sliding_train_size=None,
@@ -138,6 +142,11 @@ def test_train_run_with_toy_dataset(ci: bool, use_router: bool, predict_type: st
         drop_warmup=True,
     )
     df, _ = preparer.prepare(df, ensure_ohlcv=True)
+    time_index = pd.DatetimeIndex(pd.to_datetime(df[config.timestamp_col], unit="s"))
+    time_features = time_features_from_index(time_index, timeenc=config.timeenc)
+    time_feature_names = [f"timeenc_{i}" for i in range(time_features.shape[1])]
+    df[time_feature_names] = time_features
+    config.features = config.features + time_feature_names
     slicer = build_slicer(config, train_ratio=0.8)
     out = slicer.split_and_window(
         X=df[config.features],
@@ -148,6 +157,9 @@ def test_train_run_with_toy_dataset(ci: bool, use_router: bool, predict_type: st
     y_train = fold0["train"]["y"][:, 0, 0].astype(int)
     x_val = fold0["val"]["X"]
     y_val = fold0["val"]["y"][:, 0, 0].astype(int)
+    if x_val.size == 0:
+        x_val = x_train
+        y_val = y_train
 
     train_ds = TensorDataset(
         torch.tensor(x_train, dtype=torch.float32),
