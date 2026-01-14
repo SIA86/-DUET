@@ -7,9 +7,10 @@ from duet.model import DUETModel  # должен возвращать [B, num_cl
 from pipeline.config import DUETConfig
 import numpy as np
 from tqdm import tqdm
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
 import matplotlib.pyplot as plt
 import os
+from pipeline.evaluate import compute_pr_auc
 
 
 # --- Loss functions ---
@@ -84,6 +85,7 @@ def train_model(model, config: DUETConfig, train_loader, val_loader, device="cud
         val_accs = []
         all_preds = []
         all_targets = []
+        all_probs = []
 
         with torch.no_grad():
             for xb, yb in val_loader:
@@ -98,22 +100,28 @@ def train_model(model, config: DUETConfig, train_loader, val_loader, device="cud
                 _, predicted = torch.max(pred, 1)
                 all_preds.extend(predicted.cpu().numpy())
                 all_targets.extend(yb.cpu().numpy())
+                all_probs.append(torch.softmax(pred, dim=1).cpu().numpy())
 
         avg_train_loss = np.mean(train_losses)
         avg_train_acc = np.mean(train_accs)
         avg_val_loss = np.mean(val_losses)
         avg_val_acc = np.mean(val_accs)
+        val_macro_f1 = f1_score(all_targets, all_preds, average="macro", zero_division=0)
+        val_probs = np.concatenate(all_probs, axis=0) if all_probs else np.array([])
+        val_pr_auc = compute_pr_auc(all_targets, val_probs, config.num_classes)
 
         if config.verbose:
             print(f"[{epoch+1}/{config.epochs}] "
                   f"Train Loss: {avg_train_loss:.4f} | Train Acc: {avg_train_acc:.4f} | "
-                  f"Val Loss: {avg_val_loss:.4f} | Val Acc: {avg_val_acc:.4f}")
+                  f"Val Loss: {avg_val_loss:.4f} | Val Acc: {avg_val_acc:.4f} | "
+                  f"Val Macro F1: {val_macro_f1:.4f} | Val PR AUC: {val_pr_auc:.4f}")
 
         # --- Вывод confusion matrix раз в report_freq эпох ---
         if config.report_freq and (epoch + 1) % config.report_freq == 0:
 
-            cm = confusion_matrix(all_targets, all_preds)
-            disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=np.unique(all_targets))
+            labels = list(range(config.num_classes))
+            cm = confusion_matrix(all_targets, all_preds, labels=labels)
+            disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
             disp.plot(cmap='Blues')
             plt.title(f"Confusion Matrix — Epoch {epoch+1}")
             plt.xticks(rotation=45)
