@@ -1,7 +1,5 @@
 
-from dataclasses import dataclass
-from pydantic import Field
-
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -10,15 +8,22 @@ class DUETConfig:
     # Общие параметры
     # =========================
     timestamp_col: str = "timestamp" # Название колонки с таймстэмпом
-    features: list[str] = Field(default_factory=list)
-    forecast: list[str] = Field(default_factory=list)
-    not_to_normalise: list[str] = Field(default_factory=list)
+    features: list[str] = field(default_factory=list)
+    forecast: list[str] = field(default_factory=list)
+    not_to_normalise: list[str] = field(default_factory=list)
     scaler: str = 'STD'             # Тип нормализации (STD, MINMAX, QUANT)
     seq_len: int = 96               # Длина входной последовательности
     horizon: int = 24               # Длина выходного прогноза
     patch_len: int = 16             # Длина патча (TCM)
     stride: int = 8                 # Шаг между патчами (TCM)
     moving_avg: int = 25            # Размер окна скользящего сглаживания
+    K_t: int = 2                    # Кол-во временных кластеров (TCM)
+    K_c: int = 4                    # Кол-во кластеров каналов (CCM)
+    d_c: int = 32                   # Размерность embedding каналов (CCM)
+    top_k: int = 2                  # Кол-во связей при разреживании маски
+    use_revin: bool = True          # Включить RevIN/InstanceNorm
+    revin_affine: bool = True       # Использовать affine параметры в RevIN
+    revin_eps: float = 1e-5         # Эпсилон для стабильности RevIN
 
     # =========================
     # Параметры модели
@@ -31,12 +36,13 @@ class DUETConfig:
     fc_dropout: float = 0.1         # Dropout в выходном head слое
     activation: str = "gelu"        # Активационная функция (relu, gelu, elu)
     num_experts: int = 4            # Число экспертов (в Router, если используется)
+    report_freq: int = 5            # Частота появления отчётной метрики
 
     # =========================
     # Режимы обработки
     # =========================
     CI: bool = True                 # Channel-Independent режим (если False — shared weights)
-    use_router: bool = False        # Включить распределительный роутер
+    use_router: bool = True         # Включить распределительный роутер
     timeenc: int = 1                # Использовать time encoding (0 = без, 1 = sin/cos и т.п.)
 
     # =========================
@@ -47,13 +53,13 @@ class DUETConfig:
     learning_rate: float = 0.001    # Скорость обучения
     weight_decay: float = 1e-5      # L2 регуляризация
     patience: int = 5               # Патенс для early stopping
-    loss: str = "mse"               # Функция потерь: mse, mae, smape, mase
-    metric: str = "mae"             # Основная метрика: mae, smape, mase
+    loss: str = "mse"               # Функция потерь: mse, mae
+    metric: str = "mae"             # Основная метрика: mae, smape
 
     # =========================
     # Прочее
     # =========================
+    checkpoint_best: str = ''       # Путь для сохранения лучших весов
+    checkpoint_final: str = ''      # Путь для сохранения финальных весов
     seed: int = 42                  # Фиксированное зерно генератора случайных чисел
     verbose: bool = True            # Печать хода обучения
-    checkpoint_best: str = ''    # Путь для сохранения лучших по val_accuracy весов
-    checkpoint_final: str = ''     # Путь для сохранения финальных весов
