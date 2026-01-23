@@ -6,12 +6,14 @@ class DUETConfig:
     # =========================
     # Общие параметры
     # =========================
+    split_ratio: tuple[float] = (0.7, 0.15, 0.15)
     timestamp_col: str = "timestamp" # Название колонки с таймстэмпом
     features: list[str] = field(default_factory=list)
     forecast: str = 'target'    
     not_to_normalise: list[str] = field(default_factory=list)
     scaler: str = 'STD'             # Тип нормализации (STD, MINMAX, QUANT)
-    predict_type: str = 'detect'    # Детекция "detect" или предикт "next" следующей свечи
+    y_end_offset: int = 0   # Детекция "detect" или предикт "next" следующей свечи
+    x_end_offset: int = 0
     seq_len: int = 96               # Длина входной последовательности
     num_classes: int = 3            # Кол-во классов
     patch_len: int = 16             # Длина патча (TCM)

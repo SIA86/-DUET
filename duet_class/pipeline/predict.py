@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from typing import Any, Tuple
+from typing import Any, Tuple, Optional
 
 
 def _as_windows(x: np.ndarray, seq_len: int) -> np.ndarray:
@@ -34,20 +34,25 @@ def predict_window(model, x_window: np.ndarray, config: Any, device: str = "cuda
     return y_pred_tensor.cpu().numpy()[0]
 
 
+
 def predict_dataset_batched(
     model,
     windows: np.ndarray,
     config: Any,
     batch_size: int = 512,
     device: str = "cuda",
+    threshold: Optional[float] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Делает batched предсказания модели по заранее нарезанным окнам и возвращает:
         - labels: np.ndarray (argmax), shape: (n_windows,)
         - probs: np.ndarray (вероятности), shape: (n_windows, n_classes)
+    
+    Если передан threshold, то классы с вероятностью < threshold помечаются как -1.
     """
     model.eval()
-    X = _as_windows(windows, config.seq_len)
+    # Используем windows напрямую, так как val_x уже нарезан на окна (N, seq_len, features)
+    X = windows 
 
     preds = []
     for i in range(0, len(X), batch_size):
@@ -59,6 +64,14 @@ def predict_dataset_batched(
         preds.append(y_batch)
 
     probs = np.concatenate(preds, axis=0) if preds else np.empty((0, config.num_classes))
-    labels = np.argmax(probs, axis=1) if probs.size else np.empty((0,), dtype=int)
+    
+    if probs.size > 0:
+        labels = np.argmax(probs, axis=1)
+        if threshold is not None:
+            # Фильтруем предсказания по порогу уверенности
+            max_probs = np.max(probs, axis=1)
+            labels[max_probs < threshold] = -1
+    else:
+        labels = np.empty((0,), dtype=int)
 
     return labels, probs
